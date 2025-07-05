@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  reviews-postgres:
+    image: postgres:15
+    container_name: reviews-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${REVIEWS_POSTGRES_DB}
+      POSTGRES_USER: ${REVIEWS_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${REVIEWS_POSTGRES_PASSWORD}
+    ports:
+      - "${REVIEWS_POSTGRES_PORT}:5432"
+    volumes:
+      - reviews_pgdata:/var/lib/postgresql/data
+
+  reviews-mongo:
+    image: mongo:6
+    container_name: reviews-mongo
+    restart: always
+    ports:
+      - "${REVIEWS_MONGO_PORT}:27017"
+    volumes:
+      - reviews_mongodata:/data/db
+
+volumes:
+  reviews_pgdata:
+  reviews_mongodata:

@@ -1,0 +1,78 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - qa
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set deployment variables
+        id: set-vars
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/qa" ]]; then
+            echo "env=QA" >> $GITHUB_OUTPUT
+            echo "branch=qa" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event.pull_request.base.ref }}" == "main" ]]; then
+            echo "env=PROD" >> $GITHUB_OUTPUT
+            echo "branch=main" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Connect and deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets[format('EC2_HOST_{0}', steps.set-vars.outputs.env)] }}
+          username: ${{ secrets[format('EC2_USER_{0}', steps.set-vars.outputs.env)] }}
+          key: ${{ secrets[format('EC2_KEY_{0}', steps.set-vars.outputs.env)] }}
+          port: 22
+          timeout: 30s
+          command_timeout: 10m
+          script: |
+            cd /home/ubuntu
+
+            if [ ! -d "03-DB-TECNOSHOP" ]; then
+              git clone https://github.com/kev1226/03-DB-TECNOSHOP.git
+            fi
+
+            cd 03-DB-TECNOSHOP
+            git fetch origin
+            git reset --hard origin/${{ steps.set-vars.outputs.branch }}
+
+            cp .env.example .env
+
+            # Inyectar secretos sensibles
+            echo "REVIEWS_POSTGRES_PASSWORD=${{ secrets.REVIEWS_POSTGRES_PASSWORD }}" >> .env
+
+            # Verificar que estén definidas
+            required_vars=(
+              REVIEWS_POSTGRES_PASSWORD
+            )
+            for var in "${required_vars[@]}"; do
+              value=$(grep "^$var=" .env | cut -d '=' -f2-)
+              if [[ -z "$value" ]]; then
+                echo " ERROR: Variable $var no está definida o está vacía en .env"
+                exit 1
+              fi
+            done
+
+            # Instalar docker-compose si no existe
+            if ! command -v docker-compose &> /dev/null; then
+              echo " Instalando docker-compose..."
+              sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+            fi
+
+            echo " Desplegando servicios de reviews..."
+            docker-compose down
+            docker-compose up -d --build
+            echo "  Despliegue completado exitosamente."
